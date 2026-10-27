@@ -1,4 +1,4 @@
-import { JobStatus, Prisma } from "@prisma/client";
+import { JobStatus, type Job } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/server/db";
 
@@ -15,37 +15,38 @@ export async function GET(request: NextRequest) {
   }
 
   const workerId = crypto.randomUUID();
-  const jobs = await db.$transaction(
-    async (transaction) => {
-      const due = await transaction.$queryRaw<{ id: string }[]>(
-        Prisma.sql`
-          SELECT id
-          FROM "Job"
-          WHERE status = 'PENDING'
-            AND "runAt" <= NOW()
-          ORDER BY "runAt" ASC
-          LIMIT 25
-          FOR UPDATE SKIP LOCKED
-        `,
-      );
-      if (!due.length) return [];
+  const jobs: Job[] = [];
+  for (let index = 0; index < 25; index += 1) {
+    const candidate = await db.job.findFirst({
+      where: {
+        status: JobStatus.PENDING,
+        runAt: { lte: new Date() },
+        lockedAt: null,
+      },
+      orderBy: { runAt: "asc" },
+    });
+    if (!candidate) break;
 
-      const ids = due.map((job) => job.id);
-      await transaction.job.updateMany({
-        where: { id: { in: ids }, status: JobStatus.PENDING },
-        data: {
-          status: JobStatus.RUNNING,
-          lockedAt: new Date(),
-          lockedBy: workerId,
-          attempts: { increment: 1 },
-        },
+    const claimed = await db.job.updateMany({
+      where: {
+        id: candidate.id,
+        status: JobStatus.PENDING,
+        lockedAt: null,
+      },
+      data: {
+        status: JobStatus.RUNNING,
+        lockedAt: new Date(),
+        lockedBy: workerId,
+        attempts: { increment: 1 },
+      },
+    });
+    if (claimed.count === 1) {
+      const job = await db.job.findFirst({
+        where: { id: candidate.id, lockedBy: workerId },
       });
-      return transaction.job.findMany({
-        where: { id: { in: ids }, lockedBy: workerId },
-      });
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
-  );
+      if (job) jobs.push(job);
+    }
+  }
 
   const results = [];
   for (const job of jobs) {

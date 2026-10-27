@@ -8,7 +8,7 @@ Many companies use the app (multi-tenant), and each company's data must be fully
 2. Tech stack
 Next.js (latest, App Router) with TypeScript
 Tailwind CSS + shadcn/ui, mobile-first (principals will mostly use phones)
-PostgreSQL with Prisma ORM
+MongoDB Atlas with Prisma ORM. Use a replica-set deployment so transactions are available.
 Auth: Auth.js (NextAuth) or Clerk, with organisations/tenants and roles
 Payments: Stripe, one platform account only. Use Checkout, webhooks and refunds. Do NOT use Stripe Connect.
 SMS: Twilio

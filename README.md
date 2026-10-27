@@ -2,7 +2,8 @@
 
 SalonFlow is a mobile-first, multi-tenant booking operations app for salons and
 appointment businesses. It is built with Next.js App Router, TypeScript,
-Tailwind CSS, PostgreSQL, Prisma, Auth.js, Stripe and durable Vercel Cron jobs.
+Tailwind CSS, MongoDB Atlas, Prisma, Auth.js, Stripe and durable Vercel Cron
+jobs.
 
 The included UI uses representative demo data so it can be explored without
 third-party credentials. The Prisma schema, booking rules, Auth.js
@@ -11,10 +12,11 @@ foundation.
 
 ## Run locally
 
-Requirements: Node.js 24+, npm and PostgreSQL.
+Requirements: Node.js 24+, npm and a MongoDB Atlas cluster.
 
 ```powershell
 Copy-Item .env.example .env
+# Add your MongoDB Atlas connection string to DATABASE_URL
 npm install
 npm run db:generate
 npm run db:push
@@ -46,7 +48,7 @@ npm run test:e2e
 - `src/components` — accessible mobile-first interface.
 - `src/lib/domain` — deterministic, testable booking and money rules.
 - `src/server` — Prisma, tenant safeguards, notifications and integrations.
-- `prisma/schema.prisma` — tenant-owned operational and financial model.
+- `prisma/schema.prisma` — tenant-owned MongoDB document model.
 - `tests/unit` — cut-off, cancellation, credit, reschedule, ledger and reminder
   boundary coverage.
 
@@ -82,18 +84,21 @@ fall back to SMS/email.
 ## Time, money and jobs
 
 All timestamps are stored in UTC and rendered in the organisation timezone.
-Money is stored as integer pence. Cron claims due jobs using
-`FOR UPDATE SKIP LOCKED`, idempotency keys prevent duplicates, and exhausted
-jobs move to `DEAD_LETTER`.
+Money is stored as integer pence. Cron workers claim jobs using atomic
+compare-and-set updates, idempotency keys prevent duplicates, and exhausted
+jobs move to `DEAD_LETTER`. Use MongoDB Atlas or another replica-set deployment:
+booking, payment and ledger operations rely on multi-document transactions.
 
 ## Deployment
 
-1. Create a PostgreSQL database with point-in-time recovery.
-2. Add variables from `.env.example` to Vercel.
-3. Run `prisma migrate deploy` as a release step.
-4. Deploy the Next.js project and configure provider webhook URLs.
-5. Confirm `/api/health` and invoke the cron endpoint with `CRON_SECRET`.
-6. Enable Sentry and alert on failed webhooks and dead-letter jobs.
+1. Create a MongoDB Atlas cluster with backups and point-in-time recovery.
+2. Create a least-privilege database user, allow the deployment network, and
+   copy the Atlas connection string into `DATABASE_URL`.
+3. Add the remaining variables from `.env.example` to Vercel.
+4. Run `prisma db push` as a controlled schema synchronization step.
+5. Deploy the Next.js project and configure provider webhook URLs.
+6. Confirm `/api/health` and invoke the cron endpoint with `CRON_SECRET`.
+7. Enable Sentry and alert on failed webhooks and dead-letter jobs.
 
 Bank details must be envelope-encrypted with a managed key before production.
 Restrict provider secrets to server-only environment variables and use separate
