@@ -1,0 +1,718 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlatformRole {
+  USER
+  SUPER_ADMIN
+}
+
+enum MembershipRole {
+  OWNER
+  STAFF
+}
+
+enum OrganisationStatus {
+  INVITED
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+  CANCELLED_REFUNDED
+  CANCELLED_CREDIT
+  CANCELLED_BY_BUSINESS
+  EXPIRED
+}
+
+enum BookingPaymentMethod {
+  ONLINE_FULL
+  ONLINE_DEPOSIT
+  CASH_ON_DAY
+}
+
+enum PaymentStatus {
+  UNPAID
+  DEPOSIT_PAID
+  PART_PAID
+  PAID
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentMethod {
+  STRIPE
+  CASH
+  CARD_IN_PERSON
+  BANK_TRANSFER
+  CREDIT_VOUCHER
+}
+
+enum VoucherType {
+  BOOKING
+  CREDIT
+}
+
+enum VoucherStatus {
+  ACTIVE
+  PARTIALLY_REDEEMED
+  REDEEMED
+  EXPIRED
+  VOID
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+  MESSENGER
+  IN_APP
+}
+
+enum MessageStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  DELIVERED
+  FAILED
+  CANCELLED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+  CANCELLED
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum WaitingListStatus {
+  WAITING
+  OFFERED
+  BOOKED
+  EXPIRED
+  CANCELLED
+}
+
+model User {
+  id            String          @id @default(cuid())
+  name          String?
+  email         String?         @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  platformRole  PlatformRole    @default(USER)
+  accounts      Account[]
+  sessions      Session[]
+  memberships   Membership[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refreshToken      String? @db.Text
+  accessToken       String? @db.Text
+  expiresAt         Int?
+  tokenType         String?
+  scope             String?
+  idToken           String? @db.Text
+  sessionState      String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Organisation {
+  id                    String             @id @default(cuid())
+  name                  String
+  slug                  String             @unique
+  status                OrganisationStatus @default(ONBOARDING)
+  logoUrl               String?
+  brandColour           String             @default("#7c3aed")
+  timezone              String             @default("Europe/London")
+  currency              String             @default("GBP")
+  vatNumber             String?
+  onboardingCompletedAt DateTime?
+  settings              OrganisationSettings?
+  memberships           Membership[]
+  customers             Customer[]
+  services              Service[]
+  resources             Resource[]
+  bookings              Booking[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  organisationId String
+  userId         String
+  role           MembershipRole
+  permissions    Json?
+  organisation   Organisation   @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+
+  @@unique([organisationId, userId])
+  @@index([userId])
+}
+
+model OrganisationSettings {
+  id                         String   @id @default(cuid())
+  organisationId             String   @unique
+  refundCutoffHours          Int      @default(120)
+  creditValidityDays         Int      @default(10)
+  depositPercent             Int?
+  depositFixedPence          Int?
+  noShowThreshold            Int      @default(2)
+  paymentChaseHours          Int      @default(24)
+  paymentExpiryHours         Int      @default(48)
+  autoCancelUnpaid           Boolean  @default(false)
+  allowCapacityOverride      Boolean  @default(false)
+  staffCanRefund             Boolean  @default(false)
+  staffCanOverridePayment    Boolean  @default(false)
+  staffCanCancelPaid         Boolean  @default(false)
+  enabledPaymentMethods      Json
+  defaultPaymentMethod       BookingPaymentMethod @default(ONLINE_FULL)
+  reminderOffsetsHours       Json
+  reviewDelayHours           Int      @default(4)
+  smsSenderId                String?
+  emailFromName              String?
+  termsText                  String   @db.Text
+  cancellationPolicyText     String   @db.Text
+  encryptedBankDetails       String?
+  bankDetailsLastFour        String?
+  organisation               Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model Customer {
+  id                 String       @id @default(cuid())
+  organisationId     String
+  name               String
+  phone              String?
+  email              String?
+  messengerPsid      String?
+  marketingConsent   Boolean      @default(false)
+  smsOptedOut        Boolean      @default(false)
+  noShowCount        Int          @default(0)
+  lateCancelCount    Int          @default(0)
+  requiresPrepayment Boolean      @default(false)
+  trusted            Boolean      @default(false)
+  notes              String?      @db.Text
+  organisation       Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  bookings           Booking[]
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([organisationId, name])
+  @@index([organisationId, email])
+}
+
+model Service {
+  id             String       @id @default(cuid())
+  organisationId String
+  name           String
+  description    String?      @db.Text
+  durationMinutes Int
+  bufferMinutes  Int          @default(0)
+  pricePence     Int
+  capacity       Int          @default(1)
+  active         Boolean      @default(true)
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  bookings       Booking[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organisationId, active])
+}
+
+model Resource {
+  id             String       @id @default(cuid())
+  organisationId String
+  name           String
+  type           String       @default("STAFF")
+  active         Boolean      @default(true)
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  bookings       Booking[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organisationId, active])
+}
+
+model OpeningHours {
+  id             String @id @default(cuid())
+  organisationId String
+  weekday        Int
+  opensAt        String
+  closesAt       String
+  closed         Boolean @default(false)
+
+  @@unique([organisationId, weekday])
+}
+
+model ClosedDate {
+  id             String   @id @default(cuid())
+  organisationId String
+  startsAt       DateTime
+  endsAt         DateTime
+  reason         String?
+
+  @@index([organisationId, startsAt, endsAt])
+}
+
+model BlockedTime {
+  id             String   @id @default(cuid())
+  organisationId String
+  resourceId     String?
+  startsAt       DateTime
+  endsAt         DateTime
+  reason         String?
+
+  @@index([organisationId, startsAt, endsAt])
+}
+
+model Booking {
+  id                    String               @id @default(cuid())
+  organisationId        String
+  customerId            String
+  serviceId             String
+  resourceId            String?
+  reference             String
+  status                BookingStatus
+  paymentMethod         BookingPaymentMethod
+  paymentStatus         PaymentStatus        @default(UNPAID)
+  startsAt              DateTime
+  endsAt                DateTime
+  cutoffAt              DateTime
+  partySize             Int                  @default(1)
+  pricePence            Int
+  amountDuePence        Int
+  amountPaidPence       Int                  @default(0)
+  depositAmountPence    Int                  @default(0)
+  notes                 String?              @db.Text
+  preferredChannels     MessageChannel[]
+  lateCancel            Boolean              @default(false)
+  termsAccepted         Boolean              @default(false)
+  rescheduleCount       Int                  @default(0)
+  overrideReason        String?
+  version               Int                  @default(1)
+  organisation          Organisation         @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  customer              Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  service               Service              @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  resource              Resource?            @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  events                BookingEvent[]
+  payments              Payment[]
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@unique([organisationId, reference])
+  @@index([organisationId, startsAt, endsAt])
+  @@index([organisationId, status, startsAt])
+  @@index([resourceId, startsAt, endsAt])
+}
+
+model BookingEvent {
+  id             String   @id @default(cuid())
+  organisationId String
+  bookingId      String
+  type           String
+  summary        String
+  actorId        String?
+  metadata       Json?
+  occurredAt     DateTime @default(now())
+  booking        Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId, bookingId, occurredAt])
+}
+
+model Reschedule {
+  id             String   @id @default(cuid())
+  organisationId String
+  bookingId      String
+  oldStartsAt    DateTime
+  oldEndsAt      DateTime
+  newStartsAt    DateTime
+  newEndsAt      DateTime
+  oldPricePence  Int
+  newPricePence  Int
+  requestedBy    String
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@index([organisationId, bookingId])
+}
+
+model Payment {
+  id                      String        @id @default(cuid())
+  organisationId          String
+  bookingId               String
+  method                  PaymentMethod
+  status                  String
+  amountPence             Int
+  stripePaymentIntentId   String?       @unique
+  stripeCheckoutSessionId String?       @unique
+  stripeChargeId          String?
+  stripeFeePence          Int?
+  receivedAt              DateTime?
+  recordedById            String?
+  notes                   String?
+  booking                 Booking       @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  @@index([organisationId, bookingId])
+}
+
+model Refund {
+  id             String   @id @default(cuid())
+  organisationId String
+  paymentId      String
+  amountPence    Int
+  stripeRefundId String?  @unique
+  reason         String
+  status         String
+  createdAt      DateTime @default(now())
+
+  @@index([organisationId, paymentId])
+}
+
+model Voucher {
+  id             String        @id @default(cuid())
+  organisationId String
+  bookingId      String?
+  customerId     String
+  code           String        @unique
+  type           VoucherType
+  status         VoucherStatus @default(ACTIVE)
+  originalPence  Int
+  balancePence   Int
+  expiresAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organisationId, customerId, status])
+}
+
+model VoucherRedemption {
+  id             String   @id @default(cuid())
+  organisationId String
+  voucherId      String
+  bookingId      String
+  amountPence    Int
+  createdAt      DateTime @default(now())
+
+  @@index([organisationId, voucherId])
+}
+
+model TermsVersion {
+  id                     String   @id @default(cuid())
+  organisationId         String
+  version                Int
+  termsText               String   @db.Text
+  cancellationPolicyText String   @db.Text
+  publishedAt             DateTime @default(now())
+
+  @@unique([organisationId, version])
+}
+
+model TermsAcceptance {
+  id             String   @id @default(cuid())
+  organisationId String
+  bookingId      String
+  termsVersionId String
+  ipAddress      String
+  userAgent      String   @db.Text
+  acceptedAt     DateTime @default(now())
+
+  @@unique([bookingId, termsVersionId])
+  @@index([organisationId, bookingId])
+}
+
+model MessageTemplate {
+  id             String         @id @default(cuid())
+  organisationId String
+  channel        MessageChannel
+  type           String
+  subject        String?
+  body           String         @db.Text
+  active         Boolean        @default(true)
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([organisationId, channel, type])
+}
+
+model ScheduledMessage {
+  id             String        @id @default(cuid())
+  organisationId String
+  bookingId      String?
+  channel        MessageChannel
+  type           String
+  recipient      String
+  scheduledFor   DateTime
+  status         MessageStatus @default(SCHEDULED)
+  idempotencyKey String        @unique
+  attempts       Int           @default(0)
+  lastError      String?
+  createdAt      DateTime      @default(now())
+
+  @@index([status, scheduledFor])
+  @@index([organisationId, bookingId])
+}
+
+model MessageLog {
+  id             String        @id @default(cuid())
+  organisationId String
+  bookingId      String?
+  customerId     String?
+  channel        MessageChannel
+  type           String
+  recipient      String
+  providerId     String?
+  status         MessageStatus
+  segmentCount   Int?
+  costPence      Int?
+  failureReason  String?
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([organisationId, createdAt])
+  @@index([providerId])
+}
+
+model MessengerLink {
+  id             String   @id @default(cuid())
+  organisationId String
+  customerId     String
+  bookingId      String?
+  ref            String   @unique
+  psid           String?
+  expiresAt      DateTime
+  linkedAt       DateTime?
+  createdAt      DateTime @default(now())
+}
+
+model WaitingListEntry {
+  id             String            @id @default(cuid())
+  organisationId String
+  customerId     String
+  serviceId      String
+  windowStartsAt DateTime
+  windowEndsAt   DateTime
+  partySize      Int               @default(1)
+  status         WaitingListStatus @default(WAITING)
+  priority       Int               @default(0)
+  createdAt      DateTime          @default(now())
+
+  @@index([organisationId, serviceId, status, priority, createdAt])
+}
+
+model SlotHold {
+  id                 String   @id @default(cuid())
+  organisationId     String
+  waitingListEntryId String
+  startsAt           DateTime
+  endsAt             DateTime
+  tokenHash          String   @unique
+  expiresAt          DateTime
+  claimedAt          DateTime?
+
+  @@index([organisationId, expiresAt])
+}
+
+model LedgerTransaction {
+  id             String        @id @default(cuid())
+  organisationId String
+  type           String
+  referenceType  String
+  referenceId    String
+  description    String
+  occurredAt     DateTime      @default(now())
+  entries        LedgerEntry[]
+
+  @@unique([organisationId, type, referenceId])
+  @@index([organisationId, occurredAt])
+}
+
+model LedgerEntry {
+  id             String          @id @default(cuid())
+  organisationId String
+  transactionId  String
+  account        String
+  direction      LedgerDirection
+  amountPence    Int
+  availableAt    DateTime?
+  transaction    LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@index([organisationId, account, availableAt])
+}
+
+model Payout {
+  id                  String       @id @default(cuid())
+  organisationId      String
+  amountPence         Int
+  periodEndsAt        DateTime
+  bankReference       String
+  status              String
+  recordedById        String
+  paidAt              DateTime?
+  items               PayoutItem[]
+  createdAt           DateTime     @default(now())
+
+  @@index([organisationId, periodEndsAt])
+}
+
+model PayoutItem {
+  id            String @id @default(cuid())
+  payoutId      String
+  transactionId String
+  amountPence   Int
+  payout        Payout @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+
+  @@unique([payoutId, transactionId])
+}
+
+model Dispute {
+  id               String   @id @default(cuid())
+  organisationId   String
+  bookingId        String
+  stripeDisputeId  String   @unique
+  amountPence      Int
+  status           String
+  reason           String?
+  evidenceDueAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([organisationId, status])
+}
+
+model PlatformFeeConfig {
+  id               String   @id @default(cuid())
+  organisationId   String?
+  commissionBps    Int      @default(0)
+  fixedMonthlyPence Int     @default(0)
+  smsUnitPence     Int      @default(0)
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  createdAt        DateTime @default(now())
+
+  @@index([organisationId, effectiveFrom])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organisationId String?
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String
+  reason         String?
+  before         Json?
+  after          Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  @@index([organisationId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model Notification {
+  id             String         @id @default(cuid())
+  organisationId String
+  userId         String
+  type           String
+  title          String
+  body           String
+  channel        MessageChannel
+  readAt         DateTime?
+  createdAt      DateTime       @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+model NotificationPreference {
+  id             String         @id @default(cuid())
+  organisationId String
+  userId         String
+  type           String
+  channels       MessageChannel[]
+  enabled        Boolean        @default(true)
+
+  @@unique([organisationId, userId, type])
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  organisationId String?
+  type           String
+  payload        Json
+  status         JobStatus @default(PENDING)
+  runAt          DateTime
+  idempotencyKey String    @unique
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAt])
+  @@index([organisationId, type])
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  externalId  String
+  type        String
+  payload     Json
+  processedAt DateTime?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  @@unique([provider, externalId])
+  @@index([processedAt, createdAt])
+}
